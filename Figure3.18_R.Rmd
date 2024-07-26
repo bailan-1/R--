@@ -1,0 +1,138 @@
+---
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r 生成数据}
+#生成数据
+genXY <- function (rho =-0.5,#相关系数
+                  N =100,   #样本数量
+                  beta = c(4,2))#真实系数
+{
+  Sigma = matrix(c(1,rho,rho,1),2,2)#生成协方差矩阵
+  library(MASS)#该包提供了生成多元正态分布数据的函数mvrnorm
+  X = mvrnorm(N,c(0,0),Sigma)#生成 𝑁个样本的二维多元正态分布数据，第一个参数是样本数量，第二个参数是均值向量，第三个参数是协方差矩阵
+  Y = X[,1]*beta[1]+X[,2]*beta[2]#根据X生成Y数据
+  return(list(X=X,Y=Y))
+  
+}
+  
+```
+
+#六种方法 ##最小二乘
+
+```{r 最小二乘}
+set.seed(1234)
+data <- genXY()
+X <- data$X
+Y <- data$Y
+ols.fit = lm(Y~0+X)
+ols.beta = coef(ols.fit)#coef用于提取回归系数，此时为列向量
+ols.beta = as.matrix(t(ols.beta))#转置后再转换为矩阵的形式
+```
+
+##lasso
+
+```{r lasso}
+#创建了一个包含100个值的序列，从10^10~10^-2均匀分布，作为惩罚参数的网格
+#install.packages("glmnet")
+grid = 10^seq(10,-2,length=100)
+library(glmnet)#提供了Lasso和Ridge回归等广义线性模型的实现
+#参数解释
+#X：自变量矩阵
+#Y：响应变量向量
+#alpha，表示Lasso和Ridge的混合程度，1表示纯Lasso，0表示纯Ridge
+#lambda = grid 表示惩罚参数的网格
+lasso.fit = glmnet(X,Y,alpha = 1,lambada = grid)
+#获得参数并将其转化为矩阵
+lasso.beta = as.matrix(lasso.fit$beta)
+lasso.beta = t(lasso.beta)
+#对矩阵的列进行重新命名
+attr(lasso.beta,"dimnames") = list(NULL,c("X1","X2"))
+```
+
+##rideg
+
+```{r ridge}
+#同lasso，把alpha写成0即可
+ridge.fit = glmnet(X,Y,alpha = 0,lambada = grid)
+ridge.beta = as.matrix(ridge.fit$beta)
+ridge.beta = t(ridge.beta)
+attr(ridge.beta,"dimnames") = list(NULL,c("X1","X2"))
+```
+
+##主成分回归
+
+```{r 主成分回归}
+#install.packages("pls")
+library(pls)
+#scale表示是否对自变量进行标准化
+pcr.fit = pcr(Y~X,scale = FALSE)
+
+pcr.beta = pcr.fit$coefficients#提取的是一个多维数组，包含不同主成分数量下的回归系数
+#将回归系数矩阵按行绑定在一起，并在最前面添加一行c(0,0)，表示使用零个主成分时的回归系数
+#提取使用一个主成分时的回归系数
+#提取使用两个主成分时的回归系数
+pcr.beta = rbind(c(0,0),pcr.beta[,,1],pcr.beta[,,2])
+```
+
+##偏最小二乘法
+
+```{r}
+#掉包，使用方法如主成分回归
+plc.fit = plsr(Y~X,scale = FALSE)
+plc.beta = plc.fit$coefficients
+plc.beta = rbind(c(0,0),plc.beta[,,1],plc.beta[,,2])
+```
+
+##最优子集
+
+```{r 最优子集}
+#install.packages("leaps")
+library(leaps)
+#intercept  = FALSE表示模型不包含截距项
+bs.fit = regsubsets(x=X,y=Y,intercept  = FALSE)
+#coef(bs.fit,1)表示第一个模型的参数
+if (summary(bs.fit)$which[1,1])
+{
+  bs.beta = c(coef(bs.fit,1),0)
+}else{
+  bs.beta = c(0,coef(bs.fit,1))#coef用于提取系数
+}
+#示没有变量诗的参数，第一个模型参数，第二个模型参数按行组合起来
+bs.beta = rbind(c(0, 0), bs.beta, coef(bs.fit, 2))
+attr(bs.beta, "dimnames") = list(NULL,
+                                c("X1","X2"))
+
+```
+##画图
+
+```{r}
+plot(0,0,
+     type = "n",
+     xlab = expression(beta[1]),
+     ylab = expression(beta[2]),
+     main = substitute(paste(rho," =",r),list(r = 0.5)),
+     xlim = c(0,6),
+     ylim = c(-1,3)
+     )
+par(lwd = 3,cex = 1)
+lines(ridge.beta,col = "red")
+lines(lasso.beta,col = "green")
+lines(pcr.beta,col = "purple")
+lines(plc.beta,col="orange")
+lines(bs.beta,col = "blue")
+points(ols.beta,col = "black",pch = 16)
+abline(h = 0,lty = 2)
+abline(v = 0,lty = 2)
+legend(4.8,3,c("Ridge", "Lasso", "PCR", "PLS", "Best Subset", "Least Squares"),
+         col = c("red", "green", "purple", "orange", "blue", "black"),
+         lty = c(1,1,1,1,1,NA),
+         pch =c(NA,NA,NA,NA,NA, 16),
+         box.col = "white",
+         box.lwd = 0,
+         bg = "transparent")
+
+```
+
